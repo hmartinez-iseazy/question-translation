@@ -1,0 +1,19 @@
+{
+  "client_id": "carcasas-moviles",
+  "source_lang": "es",
+  "target_lang": "it",
+  "deepl_glossary_id": "6896171b-467a-45c2-af1d-b68b510813a1",
+  "deepl_source_lang": "ES",
+  "deepl_target_lang": "IT",
+  "name": "carcasas-moviles_es_it",
+  "created_at": "2025-01-23T12:00:00Z",
+  "updated_at": "2026-01-23T12:43:24.618677Z",
+  "entry_count": 5,
+  "entries": {
+    "Carcasa": "Custodia",
+    "Metacrilato": "Metacrilato",
+    "Funda": "Cover",
+    "Protector de pantalla": "Pellicola protettiva",
+    "Silicona": "Silicone"
+  }
+}

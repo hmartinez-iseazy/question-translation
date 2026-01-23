@@ -22,9 +22,17 @@ from src.schemas.translation import (
     LanguageInfo,
     BatchTranslationResponse,
     BatchTranslationResult,
+    GlossaryEntryCreate,
+    GlossaryAddEntries,
+    GlossaryRemoveEntries,
+    GlossarySummary,
+    GlossaryDetail,
+    GlossaryListResponse,
+    ClientListResponse,
 )
 from src.services.translator import get_translator_service
 from src.services.excel_processor import get_excel_processor
+from src.services.glossary import glossary_service
 from src.middleware.auth import verify_api_key
 from src.middleware.rate_limit import check_rate_limit
 
@@ -204,6 +212,177 @@ async def get_api_usage(rate_limit: dict = Depends(check_rate_limit)):
         raise HTTPException(status_code=500, detail=f"Failed to get usage: {str(e)}")
 
 
+# ============== Glossary Endpoints ==============
+
+
+@app.get("/glossaries/clients", response_model=ClientListResponse, tags=["Glossaries"])
+async def list_clients_with_glossaries(
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """List all clients that have glossaries configured."""
+    clients = await glossary_service.list_all_clients()
+    return ClientListResponse(clients=clients, total=len(clients))
+
+
+@app.get("/glossaries/{client_id}", response_model=GlossaryListResponse, tags=["Glossaries"])
+async def list_client_glossaries(
+    client_id: str,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """List all glossaries for a specific client."""
+    glossaries = await glossary_service.list_client_glossaries(client_id)
+    return GlossaryListResponse(
+        client_id=client_id,
+        glossaries=[GlossarySummary(**g) for g in glossaries],
+        total=len(glossaries),
+    )
+
+
+@app.get(
+    "/glossaries/{client_id}/{source_lang}/{target_lang}",
+    response_model=GlossaryDetail,
+    tags=["Glossaries"],
+)
+async def get_glossary(
+    client_id: str,
+    source_lang: str,
+    target_lang: str,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """Get a specific glossary with all entries."""
+    glossary = await glossary_service.get_glossary(client_id, source_lang, target_lang)
+    if not glossary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Glossary not found: {client_id}/{source_lang}/{target_lang}",
+        )
+    return GlossaryDetail(**glossary)
+
+
+@app.post(
+    "/glossaries/{client_id}",
+    response_model=GlossaryDetail,
+    tags=["Glossaries"],
+    status_code=201,
+)
+async def create_or_update_glossary(
+    client_id: str,
+    glossary_data: GlossaryEntryCreate,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """
+    Create or update a glossary for a client.
+
+    If glossary already exists for the language pair, it will be replaced.
+    DeepL glossaries are immutable, so updates require recreating the glossary.
+    """
+    try:
+        result = await glossary_service.create_or_update_glossary(
+            client_id=client_id,
+            source_lang=glossary_data.source_lang,
+            target_lang=glossary_data.target_lang,
+            entries=glossary_data.entries,
+            name=glossary_data.name,
+        )
+        return GlossaryDetail(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create glossary: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create glossary: {str(e)}")
+
+
+@app.post(
+    "/glossaries/{client_id}/{source_lang}/{target_lang}/entries",
+    response_model=GlossaryDetail,
+    tags=["Glossaries"],
+)
+async def add_glossary_entries(
+    client_id: str,
+    source_lang: str,
+    target_lang: str,
+    data: GlossaryAddEntries,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """
+    Add entries to an existing glossary.
+
+    If glossary doesn't exist, creates a new one.
+    Existing entries with the same source term will be overwritten.
+    """
+    try:
+        result = await glossary_service.add_entries(
+            client_id=client_id,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            new_entries=data.entries,
+        )
+        return GlossaryDetail(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to add entries: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add entries: {str(e)}")
+
+
+@app.delete(
+    "/glossaries/{client_id}/{source_lang}/{target_lang}/entries",
+    response_model=GlossaryDetail | dict,
+    tags=["Glossaries"],
+)
+async def remove_glossary_entries(
+    client_id: str,
+    source_lang: str,
+    target_lang: str,
+    data: GlossaryRemoveEntries,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """
+    Remove specific entries from a glossary.
+
+    If all entries are removed, the glossary is deleted.
+    """
+    try:
+        result = await glossary_service.remove_entries(
+            client_id=client_id,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            terms_to_remove=data.terms,
+        )
+        if result is None:
+            return {"message": "Glossary deleted (no entries remaining)"}
+        return GlossaryDetail(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to remove entries: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove entries: {str(e)}")
+
+
+@app.delete("/glossaries/{client_id}/{source_lang}/{target_lang}", tags=["Glossaries"])
+async def delete_glossary(
+    client_id: str,
+    source_lang: str,
+    target_lang: str,
+    rate_limit: dict = Depends(check_rate_limit),
+    _: str = Depends(verify_api_key),
+):
+    """Delete a glossary completely from both DeepL and local storage."""
+    deleted = await glossary_service.delete_glossary(client_id, source_lang, target_lang)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Glossary not found: {client_id}/{source_lang}/{target_lang}",
+        )
+    return {"message": "Glossary deleted successfully"}
+
+
 # ============== Translation Endpoints ==============
 
 
@@ -252,6 +431,10 @@ async def translate_excel(
         ...,
         description="Target language code (e.g., 'en', 'fr', 'de', 'pt_BR')",
     ),
+    client_id: str | None = Form(
+        None,
+        description="Optional client ID to use client-specific glossary for translation",
+    ),
     rate_limit: dict = Depends(check_rate_limit),
 ):
     """
@@ -259,6 +442,7 @@ async def translate_excel(
 
     - **file**: Excel file (.xlsx) with sheet 'Questions'
     - **target_language**: Target language code (see /languages for options)
+    - **client_id**: Optional client ID to use their glossary (if configured)
 
     Returns the translated Excel file.
     """
@@ -284,12 +468,26 @@ async def translate_excel(
         translator = get_translator_service()
         processor = get_excel_processor(translator)
 
+        # Look up glossary if client_id provided
+        glossary_id = None
+        if client_id:
+            # We need to determine source language first to look up glossary
+            # For now, assume source is 'es' (Spanish) - could be enhanced to detect
+            glossary_id = await glossary_service.get_glossary_id(
+                client_id, "es", target_language
+            )
+            if glossary_id:
+                log.info(f"Using glossary {glossary_id} for client {client_id}")
+            else:
+                log.info(f"No glossary found for client {client_id} (es -> {target_language})")
+
         log.info(f"Starting translation to {target_language}")
 
         translated_bytes, source_lang, rows_count = await processor.process_excel(
             file_stream,
             target_lang_internal=target_language,
             target_lang_deepl=deepl_code,
+            glossary_id=glossary_id,
         )
 
         log.info(f"Translation completed: {rows_count} rows translated")
@@ -297,17 +495,23 @@ async def translate_excel(
         original_name = file.filename.rsplit(".", 1)[0]
         output_filename = f"{original_name}_{target_language}.xlsx"
 
+        headers = {
+            "Content-Disposition": f'attachment; filename="{output_filename}"',
+            "X-Source-Language": source_lang or "unknown",
+            "X-Target-Language": target_language,
+            "X-Rows-Translated": str(rows_count),
+            "X-RateLimit-Limit": str(rate_limit["limit"]),
+            "X-RateLimit-Remaining": str(rate_limit["remaining"]),
+        }
+        if client_id:
+            headers["X-Client-ID"] = client_id
+        if glossary_id:
+            headers["X-Glossary-Used"] = "true"
+
         response = StreamingResponse(
             io.BytesIO(translated_bytes),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f'attachment; filename="{output_filename}"',
-                "X-Source-Language": source_lang or "unknown",
-                "X-Target-Language": target_language,
-                "X-Rows-Translated": str(rows_count),
-                "X-RateLimit-Limit": str(rate_limit["limit"]),
-                "X-RateLimit-Remaining": str(rate_limit["remaining"]),
-            },
+            headers=headers,
         )
         return response
 
@@ -341,6 +545,10 @@ async def translate_excel_batch(
         ...,
         description="Comma-separated list of target language codes (e.g., 'en,fr,de,it')",
     ),
+    client_id: str | None = Form(
+        None,
+        description="Optional client ID to use client-specific glossaries for translation",
+    ),
     rate_limit: dict = Depends(check_rate_limit),
 ):
     """
@@ -348,6 +556,7 @@ async def translate_excel_batch(
 
     - **file**: Excel file (.xlsx) with sheet 'Questions'
     - **target_languages**: Comma-separated language codes (e.g., 'en,fr,de,it')
+    - **client_id**: Optional client ID to use their glossaries (if configured)
 
     Returns a ZIP file containing all translated Excel files.
     """
@@ -394,16 +603,27 @@ async def translate_excel_batch(
         translator = get_translator_service()
         processor = get_excel_processor(translator)
 
+        # Look up glossaries for each language if client_id provided
+        glossary_map = {}
+        if client_id:
+            for internal_code, _ in language_mappings:
+                gid = await glossary_service.get_glossary_id(client_id, "es", internal_code)
+                if gid:
+                    glossary_map[internal_code] = gid
+                    log.info(f"Found glossary for {client_id}: es -> {internal_code}")
+
         log.info(f"Starting batch translation to {len(languages)} languages")
 
         async def translate_single(
             internal_code: str, deepl_code: str
         ) -> tuple[str, bytes, int]:
             file_stream = io.BytesIO(content)
+            glossary_id = glossary_map.get(internal_code)
             translated_bytes, _, rows_count = await processor.process_excel(
                 file_stream,
                 target_lang_internal=internal_code,
                 target_lang_deepl=deepl_code,
+                glossary_id=glossary_id,
             )
             return internal_code, translated_bytes, rows_count
 

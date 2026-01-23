@@ -53,17 +53,29 @@ class TranslatorService:
         self.timeout = self.settings.deepl_timeout
 
     def _translate_sync(
-        self, texts: List[str], target_lang: str, source_lang: str | None = None
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: str | None = None,
+        glossary_id: str | None = None,
     ) -> List:
         """Synchronous translation call (runs in thread pool)."""
-        return self.translator.translate_text(
-            texts,
-            target_lang=target_lang,
-            source_lang=source_lang.upper() if source_lang else None,
-        )
+        kwargs = {
+            "text": texts,
+            "target_lang": target_lang,
+            "source_lang": source_lang.upper() if source_lang else None,
+        }
+        if glossary_id:
+            kwargs["glossary"] = glossary_id
+            logger.debug(f"Using glossary: {glossary_id}")
+        return self.translator.translate_text(**kwargs)
 
     async def _translate_with_retry(
-        self, texts: List[str], target_lang: str, source_lang: str | None = None
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: str | None = None,
+        glossary_id: str | None = None,
     ) -> List:
         """
         Translate with exponential backoff retry on failure.
@@ -81,7 +93,9 @@ class TranslatorService:
                 result = await asyncio.wait_for(
                     loop.run_in_executor(
                         _executor,
-                        lambda t=texts: self._translate_sync(t, target_lang, source_lang),
+                        lambda t=texts, g=glossary_id: self._translate_sync(
+                            t, target_lang, source_lang, g
+                        ),
                     ),
                     timeout=self.timeout,
                 )
@@ -128,17 +142,27 @@ class TranslatorService:
         raise last_exception or Exception("Translation failed after all retries")
 
     async def translate_text(
-        self, text: str, target_lang: str, source_lang: str | None = None
+        self,
+        text: str,
+        target_lang: str,
+        source_lang: str | None = None,
+        glossary_id: str | None = None,
     ) -> str:
         """Translate a single text string."""
         if not text or not text.strip():
             return text
 
-        result = await self._translate_with_retry([text], target_lang, source_lang)
+        result = await self._translate_with_retry(
+            [text], target_lang, source_lang, glossary_id
+        )
         return result[0].text if isinstance(result, list) else result.text
 
     async def translate_batch(
-        self, texts: List[str], target_lang: str, source_lang: str | None = None
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: str | None = None,
+        glossary_id: str | None = None,
     ) -> List[str]:
         """Translate multiple texts in batches with retry support."""
         if not texts:
@@ -154,7 +178,12 @@ class TranslatorService:
         batches = _create_batches(indexed_texts)
         total_batches = len(batches)
 
-        logger.info(f"Translating {len(indexed_texts)} texts in {total_batches} batch(es)")
+        if glossary_id:
+            logger.info(
+                f"Translating {len(indexed_texts)} texts in {total_batches} batch(es) with glossary {glossary_id}"
+            )
+        else:
+            logger.info(f"Translating {len(indexed_texts)} texts in {total_batches} batch(es)")
 
         # Prepare result list
         translated = list(texts)
@@ -168,7 +197,7 @@ class TranslatorService:
 
             # Use retry-enabled translation
             results = await self._translate_with_retry(
-                texts_to_translate, target_lang, source_lang
+                texts_to_translate, target_lang, source_lang, glossary_id
             )
 
             # Handle single result

@@ -27,6 +27,7 @@ class ExcelProcessor:
         file_content: BinaryIO,
         target_lang_internal: str,
         target_lang_deepl: str,
+        glossary_id: str | None = None,
     ) -> tuple[bytes, str | None, int]:
         """
         Process Excel file and translate specified columns in Questions sheet.
@@ -40,6 +41,7 @@ class ExcelProcessor:
             file_content: Excel file bytes
             target_lang_internal: Internal language code (e.g., 'en', 'pt_BR') - written to C3
             target_lang_deepl: DeepL API code (e.g., 'EN-US', 'PT-BR') - used for translation
+            glossary_id: Optional DeepL glossary ID to use for translation
 
         Returns:
             tuple: (translated_excel_bytes, source_language, rows_translated)
@@ -96,7 +98,8 @@ class ExcelProcessor:
             translated_texts = await self.translator.translate_batch(
                 texts_to_translate,
                 target_lang=target_lang_deepl,
-                source_lang=source_lang
+                source_lang=source_lang,
+                glossary_id=glossary_id,
             )
 
             # Write translated texts back to cells

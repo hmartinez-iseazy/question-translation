@@ -1,0 +1,19 @@
+{
+  "client_id": "carcasas-moviles",
+  "source_lang": "es",
+  "target_lang": "en",
+  "deepl_glossary_id": "c198d143-2e0d-4aeb-b84b-f4a57eef5b66",
+  "deepl_source_lang": "ES",
+  "deepl_target_lang": "EN",
+  "name": "carcasas-moviles_es_en",
+  "created_at": "2025-01-23T12:00:00Z",
+  "updated_at": "2026-01-23T13:00:43.563424Z",
+  "entry_count": 5,
+  "entries": {
+    "carcasa": "phone case",
+    "metacrilato": "acrylic",
+    "funda": "cover",
+    "protector de pantalla": "screen protector",
+    "silicona": "silicone"
+  }
+}
