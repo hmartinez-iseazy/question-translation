@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Docs
+*.md
+!README.md
+
+# Examples
+examples/
+
+# Local files
+*.xlsx
+*.zip
+*.log

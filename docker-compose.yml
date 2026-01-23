@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  translation-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: question-translation
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPL_API_KEY=${DEEPL_API_KEY}
+      - API_KEY=${API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-10}
+      - MAX_LANGUAGES_PER_BATCH=${MAX_LANGUAGES_PER_BATCH:-20}
+      - DEEPL_TIMEOUT=${DEEPL_TIMEOUT:-30}
+      - DEEPL_MAX_RETRIES=${DEEPL_MAX_RETRIES:-3}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/live')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Optional: For production with multiple instances behind a load balancer
+  # Uncomment and configure as needed
+  #
+  # translation-service-2:
+  #   extends:
+  #     service: translation-service
+  #   container_name: question-translation-2
+  #   ports:
+  #     - "8001:8000"
+  #
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - translation-service
+  #     - translation-service-2
