@@ -3,6 +3,7 @@ import asyncio
 import zipfile
 import time
 import uuid
+from time import perf_counter
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -617,6 +618,7 @@ async def translate_excel_batch(
         async def translate_single(
             internal_code: str, deepl_code: str
         ) -> tuple[str, bytes, int]:
+            t0 = perf_counter()
             file_stream = io.BytesIO(content)
             glossary_id = glossary_map.get(internal_code)
             translated_bytes, _, rows_count = await processor.process_excel(
@@ -625,15 +627,19 @@ async def translate_excel_batch(
                 target_lang_deepl=deepl_code,
                 glossary_id=glossary_id,
             )
+            log.info(f"[TIMING] translate_single({internal_code}): {perf_counter() - t0:.3f}s")
             return internal_code, translated_bytes, rows_count
 
+        t_gather = perf_counter()
         tasks = [
             translate_single(internal_code, deepl_code)
             for internal_code, deepl_code in language_mappings
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        log.info(f"[TIMING] asyncio.gather ({len(languages)} langs): {perf_counter() - t_gather:.3f}s")
 
         # Create ZIP file
+        t_zip = perf_counter()
         zip_buffer = io.BytesIO()
         successful = 0
 
@@ -649,6 +655,7 @@ async def translate_excel_batch(
                 successful += 1
 
         zip_buffer.seek(0)
+        log.info(f"[TIMING] zip_creation: {perf_counter() - t_zip:.3f}s")
 
         log.info(f"Batch translation completed: {successful}/{len(languages)} successful")
 

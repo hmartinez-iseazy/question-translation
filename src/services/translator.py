@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
@@ -60,6 +61,8 @@ class TranslatorService:
         glossary_id: str | None = None,
     ) -> List:
         """Synchronous translation call (runs in thread pool)."""
+        t0 = time.perf_counter()
+        total_chars = sum(len(t) for t in texts)
         kwargs = {
             "text": texts,
             "target_lang": target_lang,
@@ -68,7 +71,9 @@ class TranslatorService:
         if glossary_id:
             kwargs["glossary"] = glossary_id
             logger.debug(f"Using glossary: {glossary_id}")
-        return self.translator.translate_text(**kwargs)
+        result = self.translator.translate_text(**kwargs)
+        logger.info(f"[TIMING] deepl_api_call: {time.perf_counter() - t0:.3f}s ({len(texts)} texts, {total_chars} chars, target={target_lang})")
+        return result
 
     async def _translate_with_retry(
         self,
@@ -188,6 +193,8 @@ class TranslatorService:
         # Prepare result list
         translated = list(texts)
 
+        t_batch_total = time.perf_counter()
+
         for batch_num, batch in enumerate(batches, 1):
             texts_to_translate = [t for _, t in batch]
 
@@ -196,9 +203,11 @@ class TranslatorService:
             )
 
             # Use retry-enabled translation
+            t0 = time.perf_counter()
             results = await self._translate_with_retry(
                 texts_to_translate, target_lang, source_lang, glossary_id
             )
+            logger.info(f"[TIMING] batch_{batch_num}_with_retry: {time.perf_counter() - t0:.3f}s")
 
             # Handle single result
             if not isinstance(results, list):
@@ -210,7 +219,7 @@ class TranslatorService:
 
             logger.info(f"Batch {batch_num}/{total_batches} completed")
 
-        logger.info("Translation completed")
+        logger.info(f"[TIMING] translate_batch TOTAL: {time.perf_counter() - t_batch_total:.3f}s ({len(indexed_texts)} texts, {total_batches} batches, target={target_lang})")
         return translated
 
     def get_usage(self) -> dict:

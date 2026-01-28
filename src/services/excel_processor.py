@@ -1,6 +1,9 @@
+import asyncio
 import io
 import logging
+import time
 from openpyxl import load_workbook
+from openpyxl.formatting.formatting import ConditionalFormattingList
 from openpyxl.worksheet.worksheet import Worksheet
 from typing import BinaryIO
 
@@ -70,12 +73,18 @@ class ExcelProcessor:
         Returns:
             tuple: (translated_excel_bytes, source_language, rows_translated)
         """
+        t_total = time.perf_counter()
+
         # Load workbook preserving everything (no data_only)
-        wb = load_workbook(filename=file_content)
+        t0 = time.perf_counter()
+        wb = await asyncio.to_thread(load_workbook, file_content)
+        logger.info(f"[TIMING] load_workbook: {time.perf_counter() - t0:.3f}s")
 
         # Also load with data_only to read cached values for formula cells
+        t0 = time.perf_counter()
         file_content.seek(0) if hasattr(file_content, 'seek') else None
-        wb_data = load_workbook(filename=file_content, data_only=True)
+        wb_data = await asyncio.to_thread(load_workbook, file_content, data_only=True)
+        logger.info(f"[TIMING] load_workbook (data_only): {time.perf_counter() - t0:.3f}s")
 
         # Check if the sheet exists
         if SHEET_NAME not in wb.sheetnames:
@@ -106,6 +115,7 @@ class ExcelProcessor:
             return output.getvalue(), source_lang, 0
 
         # Collect all texts to translate
+        t0 = time.perf_counter()
         texts_to_translate = []
         cell_positions = []  # (row, column_letter) tuples
 
@@ -120,15 +130,20 @@ class ExcelProcessor:
                     texts_to_translate.append(str(cell.value))
                     cell_positions.append((row_idx, col_letter))
 
+        logger.info(f"[TIMING] collect_texts: {time.perf_counter() - t0:.3f}s ({len(texts_to_translate)} texts from {last_row_with_data - DATA_START_ROW + 1} rows)")
+
         rows_translated = 0
         if texts_to_translate:
             # Batch translate all texts using DeepL code
+            t0 = time.perf_counter()
             translated_texts = await self.translator.translate_batch(
                 texts_to_translate,
                 target_lang=target_lang_deepl,
                 source_lang=source_lang,
                 glossary_id=glossary_id,
             )
+
+            logger.info(f"[TIMING] deepl_translate: {time.perf_counter() - t0:.3f}s ({len(texts_to_translate)} texts)")
 
             # Write translated texts back to cells
             for (row_idx, col_letter), translated_text in zip(cell_positions, translated_texts):
@@ -141,16 +156,38 @@ class ExcelProcessor:
         ws[LANGUAGE_CELL] = target_lang_internal
 
         # Resolve Questions_process formulas with computed values
+        t0 = time.perf_counter()
         ws_data = wb_data[SHEET_NAME] if SHEET_NAME in wb_data.sheetnames else None
         if PROCESS_SHEET_NAME in wb.sheetnames:
             self._resolve_process_sheet(wb, ws, target_lang_internal, ws_data)
         else:
             logger.debug(f"Sheet '{PROCESS_SHEET_NAME}' not found, skipping resolution")
+        logger.info(f"[TIMING] resolve_process_sheet: {time.perf_counter() - t0:.3f}s")
 
-        # Save to bytes (preserves all other sheets, formatting, etc.)
+        # Strip conditional formatting rules from all sheets before saving.
+        # The Questions sheet has ~3000 conditional formatting rules that cause
+        # openpyxl's save to take ~85s per file. Since the output is for import
+        # (not Excel viewing), these visual rules are not needed.
+        t0 = time.perf_counter()
+        total_cf_rules = 0
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            num_rules = len(sheet.conditional_formatting)
+            if num_rules > 0:
+                total_cf_rules += num_rules
+                sheet.conditional_formatting = ConditionalFormattingList()
+        if total_cf_rules > 0:
+            logger.info(f"Stripped {total_cf_rules} conditional formatting rules")
+        logger.info(f"[TIMING] strip_conditional_formatting: {time.perf_counter() - t0:.3f}s")
+
+        # Save to bytes
+        t0 = time.perf_counter()
         output = io.BytesIO()
-        wb.save(output)
+        await asyncio.to_thread(wb.save, output)
         output.seek(0)
+        logger.info(f"[TIMING] save_workbook: {time.perf_counter() - t0:.3f}s")
+
+        logger.info(f"[TIMING] process_excel TOTAL: {time.perf_counter() - t_total:.3f}s (lang={target_lang_internal}, rows={rows_translated})")
 
         return output.getvalue(), source_lang, rows_translated
 
@@ -198,10 +235,12 @@ class ExcelProcessor:
             )
 
             if not has_data:
-                # Write empty values for rows without data
-                for col in range(1, 11):
-                    ws_process.cell(row=process_row, column=col).value = ""
-                continue
+                # Delete remaining rows (formulas) to avoid slow serialization
+                remaining = ws_process.max_row - process_row + 1
+                if remaining > 0:
+                    ws_process.delete_rows(process_row, remaining)
+                    logger.debug(f"Deleted {remaining} empty formula rows from {PROCESS_SHEET_NAME}")
+                break
 
             rows_resolved += 1
 
