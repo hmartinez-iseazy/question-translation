@@ -107,6 +107,8 @@ class GlossaryService:
                 deepl_target_glossary = "EN"
             elif deepl_target in ["PT-PT", "PT-BR"]:
                 deepl_target_glossary = "PT"
+            elif deepl_target in ["ES-419"]:
+                deepl_target_glossary = "ES"
 
             glossary = self.translator.create_glossary(
                 name=glossary_name,

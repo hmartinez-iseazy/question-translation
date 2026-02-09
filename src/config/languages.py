@@ -50,32 +50,32 @@ LANGUAGE_MAP = {
     # Rumano
     "ro": "RO",
 
-    # Catalán - NO SOPORTADO por DeepL, usar español como fallback
-    "ca_ES": "ES",
+    # Catalán
+    "ca_ES": "CA",
 
-    # Euskera - NO SOPORTADO por DeepL, usar español como fallback
-    "eu": "ES",
+    # Euskera
+    "eu": "EU",
 
-    # Mexicano (español mexicano) - DeepL no distingue, usar español
-    "mx": "ES",
+    # Mexicano (español mexicano) - DeepL no tiene es-MX, usar latinoamericano
+    "mx": "ES-419",
 
     # Húngaro
     "hu": "HU",
 
-    # Croata - NO SOPORTADO directamente, pero DeepL lo acepta como HR (experimental)
+    # Croata
     "hr": "HR",
 
-    # Serbio - NO SOPORTADO por DeepL
+    # Serbio
     "sr": "SR",
 
-    # Bosnio - NO SOPORTADO por DeepL
+    # Bosnio
     "bs": "BS",
 
     # Búlgaro
     "bg": "BG",
 
-    # Montenegrino - NO SOPORTADO, muy similar a serbio
-    "cnr": "SR",
+    # Montenegrino - DeepL no lo tiene, usar bosnio (más cercano, alfabeto latino)
+    "cnr": "BS",
 
     # Flamenco (holandés belga) - usar holandés
     "nl_be": "NL",
@@ -86,7 +86,7 @@ LANGUAGE_MAP = {
     # Eslovaco
     "sk": "SK",
 
-    # Hindi - NO SOPORTADO por DeepL
+    # Hindi
     "hi": "HI",
 
     # Noruego
@@ -105,15 +105,9 @@ LANGUAGE_MAP = {
     "uk": "UK",
 }
 
-# Languages NOT fully supported by DeepL (will attempt but may fail)
+# Languages NOT directly supported by DeepL (mapped to closest alternative)
 UNSUPPORTED_LANGUAGES = {
-    "ca_ES",  # Catalán
-    "eu",     # Euskera
-    "sr",     # Serbio
-    "bs",     # Bosnio
-    "cnr",    # Montenegrino
-    "hi",     # Hindi
-    "hr",     # Croata (experimental)
+    "cnr",    # Montenegrino -> Bosnio (BS)
 }
 
 
@@ -206,19 +200,19 @@ class TargetLanguage(str, Enum):
     UK = "uk"
     # Nederlands (België)
     NL_BE = "nl_be"
-    # Español (México) - fallback to ES
+    # Español (México) - uses ES-419 (Latin American Spanish)
     MX = "mx"
-    # Català - fallback to ES
+    # Català
     CA_ES = "ca_ES"
-    # Euskara - fallback to ES
+    # Euskara
     EU = "eu"
-    # Hrvatski (experimental)
+    # Hrvatski
     HR = "hr"
-    # Srpski (experimental)
+    # Srpski
     SR = "sr"
-    # Bosanski (experimental)
+    # Bosanski
     BS = "bs"
-    # Crnogorski - fallback to SR
+    # Crnogorski - uses BS (Bosnian)
     CNR = "cnr"
 
     @classmethod

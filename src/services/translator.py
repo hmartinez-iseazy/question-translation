@@ -14,6 +14,9 @@ from src.config.settings import get_settings
 MAX_CHARS_PER_BATCH = 100000  # ~100KB character limit
 MAX_TEXTS_PER_BATCH = 200  # Max texts per request
 
+# Languages that require model_type="quality_optimized" (beta/next-gen in DeepL)
+QUALITY_OPTIMIZED_LANGS = {"ES-419", "CA", "EU"}
+
 logger = logging.getLogger(__name__)
 
 # Thread pool for running blocking DeepL calls
@@ -68,6 +71,8 @@ class TranslatorService:
             "target_lang": target_lang,
             "source_lang": source_lang.upper() if source_lang else None,
         }
+        if target_lang.upper() in QUALITY_OPTIMIZED_LANGS:
+            kwargs["model_type"] = "quality_optimized"
         if glossary_id:
             kwargs["glossary"] = glossary_id
             logger.debug(f"Using glossary: {glossary_id}")
