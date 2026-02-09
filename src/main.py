@@ -16,6 +16,7 @@ from src.config.languages import (
     get_deepl_code,
     get_all_languages,
     is_supported,
+    TargetLanguage,
 )
 from src.schemas.translation import (
     TranslationResponse,
@@ -30,10 +31,15 @@ from src.schemas.translation import (
     GlossaryDetail,
     GlossaryListResponse,
     ClientListResponse,
+    DocumentTranslationResponse,
 )
 from src.services.translator import get_translator_service
 from src.services.excel_processor import get_excel_processor
 from src.services.glossary import glossary_service
+from src.services.document_translator import (
+    get_document_translator_service,
+    SUPPORTED_EXTENSIONS,
+)
 from src.middleware.auth import verify_api_key
 from src.middleware.rate_limit import check_rate_limit
 
@@ -72,7 +78,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Questions Translation Service",
     description="""
-    Microservice for translating question Excel files using DeepL API.
+    Microservice for translating question Excel files and documents using DeepL API.
 
     ## Authentication
     All endpoints (except health checks) require an API key in the `X-API-Key` header.
@@ -80,16 +86,23 @@ app = FastAPI(
     ## Rate Limiting
     Requests are rate limited per client. Check response headers for limit info.
 
-    ## Endpoints
-    - `POST /translate` - Translate to a single language, returns Excel
-    - `POST /translate/batch` - Translate to multiple languages, returns ZIP
+    ## Excel Translation Endpoints
+    - `POST /translate` - Translate Excel to a single language, returns Excel
+    - `POST /translate/batch` - Translate Excel to multiple languages, returns ZIP
+
+    ## Document Translation Endpoints
+    - `POST /translate/document` - Translate any document (PDF, DOCX, etc.), returns translated file
+    - `POST /translate/document/info` - Translate document and return metadata
+
+    ## Supported Document Formats
+    PDF, DOCX, DOC, PPTX, XLSX, HTML, HTM, TXT, XLF, XLIFF, SRT, JPG, JPEG, PNG
 
     ## Excel Format
     - Sheet name: `Questions`
     - Translates columns D, E, F, G, H (starting row 7)
     - Updates language code in cell C3
     """,
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -833,6 +846,220 @@ async def translate_excel_info(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+
+
+# ============== Document Translation Endpoint ==============
+
+
+async def validate_document(file: UploadFile) -> bytes:
+    """Validate uploaded document for DeepL translation."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    # Check if file extension is supported
+    from pathlib import Path
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_EXTENSIONS.keys()))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: '{ext}'. Supported formats: {supported}",
+        )
+
+    content = await file.read()
+
+    # DeepL has a 30MB limit for documents
+    max_size = 30 * 1024 * 1024  # 30MB
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail="File too large. Maximum size for document translation is 30MB",
+        )
+
+    return content
+
+
+@app.post(
+    "/translate/document",
+    response_class=StreamingResponse,
+    tags=["Document Translation"],
+    dependencies=[Depends(verify_api_key)],
+    responses={
+        200: {
+            "description": "Translated document file",
+            "content": {"application/octet-stream": {}},
+        },
+        400: {"description": "Invalid request or unsupported file format"},
+        401: {"description": "Unauthorized"},
+        413: {"description": "File too large"},
+        429: {"description": "Rate limit exceeded"},
+        500: {"description": "Translation error"},
+    },
+)
+async def translate_document(
+    request: Request,
+    file: UploadFile = File(..., description="Document to translate (PDF, DOCX, PPTX, XLSX, HTML, TXT, etc.)"),
+    target_language: TargetLanguage = Form(
+        ...,
+        description="Target language for translation",
+    ),
+    rate_limit: dict = Depends(check_rate_limit),
+):
+    """
+    Translate any supported document to the target language.
+
+    DeepL automatically detects the source language. The document structure
+    and formatting are preserved in the translation.
+
+    **Supported formats:** PDF, DOCX, DOC, PPTX, XLSX, HTML, HTM, TXT, XLF, XLIFF, SRT, JPG, JPEG, PNG
+
+    **Note:** Documents are billed at a minimum of 50,000 characters regardless of actual content.
+
+    - **file**: Document to translate
+    - **target_language**: Target language (select from dropdown)
+
+    Returns the translated document in the same format.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    log = get_logger(__name__, request_id=request_id)
+
+    # Get the internal code from the enum
+    lang_code = target_language.value
+
+    # Get DeepL code
+    deepl_code = get_deepl_code(lang_code)
+    if not deepl_code:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown language code: '{lang_code}'",
+        )
+
+    if not is_supported(lang_code):
+        log.warning(f"Language '{lang_code}' may not be fully supported by DeepL")
+
+    try:
+        content = await validate_document(file)
+
+        log.info(f"Starting document translation: {file.filename} -> {lang_code}")
+
+        doc_translator = get_document_translator_service()
+        translated_bytes, status = await doc_translator.translate_document(
+            file_content=content,
+            filename=file.filename,
+            target_lang=deepl_code,
+        )
+
+        log.info(
+            f"Document translation completed: {file.filename} "
+            f"(billed_chars={status.billed_characters})"
+        )
+
+        # Build output filename
+        from pathlib import Path
+
+        original_path = Path(file.filename)
+        # For .doc input, DeepL returns .docx
+        output_ext = ".docx" if original_path.suffix.lower() == ".doc" else original_path.suffix
+        output_filename = f"{original_path.stem}_{lang_code}{output_ext}"
+
+        # Determine content type
+        content_type = SUPPORTED_EXTENSIONS.get(
+            output_ext.lower(), "application/octet-stream"
+        )
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{output_filename}"',
+            "X-Target-Language": lang_code,
+            "X-Billed-Characters": str(status.billed_characters or 0),
+            "X-RateLimit-Limit": str(rate_limit["limit"]),
+            "X-RateLimit-Remaining": str(rate_limit["remaining"]),
+        }
+
+        return StreamingResponse(
+            io.BytesIO(translated_bytes),
+            media_type=content_type,
+            headers=headers,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Document translation failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Document translation failed: {str(e)}"
+        )
+
+
+@app.post(
+    "/translate/document/info",
+    response_model=DocumentTranslationResponse,
+    tags=["Document Translation"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def translate_document_info(
+    request: Request,
+    file: UploadFile = File(..., description="Document to translate"),
+    target_language: TargetLanguage = Form(
+        ...,
+        description="Target language for translation",
+    ),
+    rate_limit: dict = Depends(check_rate_limit),
+):
+    """
+    Translate a document and return metadata (without file download).
+
+    Useful for getting translation info like billed characters without
+    downloading the file.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    log = get_logger(__name__, request_id=request_id)
+
+    lang_code = target_language.value
+    deepl_code = get_deepl_code(lang_code)
+
+    if not deepl_code:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown language code: '{lang_code}'",
+        )
+
+    try:
+        content = await validate_document(file)
+
+        log.info(f"Starting document translation (info): {file.filename} -> {lang_code}")
+
+        doc_translator = get_document_translator_service()
+        _, status = await doc_translator.translate_document(
+            file_content=content,
+            filename=file.filename,
+            target_lang=deepl_code,
+        )
+
+        from pathlib import Path
+
+        original_path = Path(file.filename)
+        output_ext = ".docx" if original_path.suffix.lower() == ".doc" else original_path.suffix
+        output_filename = f"{original_path.stem}_{lang_code}{output_ext}"
+
+        return DocumentTranslationResponse(
+            success=True,
+            message="Document translation completed successfully",
+            original_filename=file.filename,
+            translated_filename=output_filename,
+            target_language=lang_code,
+            detected_source_language=None,  # DeepL doesn't expose this for documents
+            document_type=original_path.suffix.lower().lstrip("."),
+            billed_characters=status.billed_characters,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Document translation failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Document translation failed: {str(e)}"
+        )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,9 @@
 # Format: "internal_code": "deepl_code"
 # Add new languages here as needed
 
+from enum import Enum
+
+
 LANGUAGE_MAP = {
     # Español
     "es": "ES",
@@ -149,3 +152,76 @@ def get_all_languages() -> list[dict]:
         }
         for code, deepl_code in LANGUAGE_MAP.items()
     ]
+
+
+# Enum for Swagger dropdown - only fully supported languages
+class TargetLanguage(str, Enum):
+    """Supported target languages for translation (Swagger dropdown)."""
+
+    # Español
+    ES = "es"
+    # English (US)
+    EN = "en"
+    # Italiano
+    IT = "it"
+    # Français
+    FR = "fr"
+    # Deutsch
+    DE = "de"
+    # Português (Portugal)
+    PT = "pt"
+    # Português (Brasil)
+    PT_BR = "pt_BR"
+    # Русский
+    RU = "ru"
+    # Nederlands
+    NL = "nl"
+    # 中文 (简体)
+    ZH = "zh"
+    # 日本語
+    JP = "jp"
+    # Polski
+    PL = "pl"
+    # Ελληνικά
+    GR = "gr"
+    # Română
+    RO = "ro"
+    # Magyar
+    HU = "hu"
+    # Български
+    BG = "bg"
+    # Türkçe
+    TR = "tr"
+    # Slovenčina
+    SK = "sk"
+    # Norsk
+    NO = "no"
+    # Suomi
+    FI = "fi"
+    # Dansk
+    DA = "da"
+    # Čeština
+    CS = "cs"
+    # Українська
+    UK = "uk"
+    # Nederlands (België)
+    NL_BE = "nl_be"
+    # Español (México) - fallback to ES
+    MX = "mx"
+    # Català - fallback to ES
+    CA_ES = "ca_ES"
+    # Euskara - fallback to ES
+    EU = "eu"
+    # Hrvatski (experimental)
+    HR = "hr"
+    # Srpski (experimental)
+    SR = "sr"
+    # Bosanski (experimental)
+    BS = "bs"
+    # Crnogorski - fallback to SR
+    CNR = "cnr"
+
+    @classmethod
+    def get_deepl_code(cls, value: str) -> str | None:
+        """Get the DeepL API code for this language."""
+        return LANGUAGE_MAP.get(value)

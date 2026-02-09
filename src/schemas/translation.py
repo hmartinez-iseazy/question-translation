@@ -117,3 +117,16 @@ class ClientListResponse(BaseModel):
     """Response with list of clients that have glossaries."""
     clients: list[str]
     total: int
+
+
+# Document translation schemas
+class DocumentTranslationResponse(BaseModel):
+    """Response metadata for document translation."""
+    success: bool
+    message: str
+    original_filename: str
+    translated_filename: str
+    target_language: str
+    detected_source_language: str | None = None
+    document_type: str
+    billed_characters: int | None = None
