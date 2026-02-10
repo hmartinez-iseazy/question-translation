@@ -96,10 +96,9 @@ class GlossaryService:
         glossary_name = name or f"{client_id}_{source_lang}_{target_lang}"
 
         try:
-            # DeepL requires specific language codes for glossaries
-            # Source must be base language (ES, EN, etc.)
-            # Target can be specific (EN-US, PT-BR, etc.) but some need base
-            deepl_source_base = deepl_source.split("-")[0]  # ES, EN, etc.
+            # DeepL requires base language codes for glossaries in most cases,
+            # but ES-419 is a valid distinct code (not same as ES)
+            deepl_source_base = deepl_source if deepl_source == "ES-419" else deepl_source.split("-")[0]
 
             # For target, some languages need base code for glossaries
             deepl_target_glossary = deepl_target
@@ -107,8 +106,6 @@ class GlossaryService:
                 deepl_target_glossary = "EN"
             elif deepl_target in ["PT-PT", "PT-BR"]:
                 deepl_target_glossary = "PT"
-            elif deepl_target in ["ES-419"]:
-                deepl_target_glossary = "ES"
 
             glossary = self.translator.create_glossary(
                 name=glossary_name,
